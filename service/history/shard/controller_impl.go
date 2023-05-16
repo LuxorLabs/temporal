@@ -50,6 +50,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
+	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/searchattribute"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/util"
@@ -79,6 +80,7 @@ type (
 		sync.RWMutex
 		historyShards               map[int32]*ContextImpl
 		logger                      log.Logger
+		visibilityManager           manager.VisibilityManager
 		persistenceExecutionManager persistence.ExecutionManager
 		persistenceShardManager     persistence.ShardManager
 		clientBean                  client.Bean
@@ -297,6 +299,7 @@ func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, e
 		c.shardClosedCallback,
 		c.logger,
 		c.throttledLogger,
+		c.visibilityManager,
 		c.persistenceExecutionManager,
 		c.persistenceShardManager,
 		c.clientBean,

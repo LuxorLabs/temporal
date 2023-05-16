@@ -52,6 +52,12 @@ import (
 	"go.temporal.io/server/common/util"
 )
 
+const (
+	// TODO: remove interim metric names for tracking fraction of FE->History calls during migration
+	accessHistoryOld = "access-history-old"
+	accessHistoryNew = "access-history-new"
+)
+
 // Config represents configuration for frontend service
 type Config struct {
 	NumHistoryShards                      int32
@@ -173,6 +179,9 @@ type Config struct {
 
 	EnableWorkerVersioningData     dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	EnableWorkerVersioningWorkflow dynamicconfig.BoolPropertyFnWithNamespaceFilter
+
+	// AccessHistoryFraction is an interim flag across 2 minor releases and will be removed once fully enabled.
+	AccessHistoryFraction dynamicconfig.FloatPropertyFn
 }
 
 // NewConfig returns new service config with default values
@@ -256,6 +265,8 @@ func NewConfig(
 
 		EnableWorkerVersioningData:     dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableWorkerVersioningDataAPIs, false),
 		EnableWorkerVersioningWorkflow: dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs, false),
+
+		AccessHistoryFraction: dc.GetFloat64Property(dynamicconfig.FrontendAccessHistoryFraction, 0.0),
 	}
 }
 
@@ -415,6 +426,16 @@ func numFrontendHosts(
 		return defaultHosts
 	}
 	return ringSize
+}
+
+// TODO: remove interim dynamic config helper for dialing fraction of FE->History calls
+func (c *Config) accessHistory(metricsHandler metrics.Handler) bool {
+	if rand.Float64() < c.AccessHistoryFraction() {
+		metricsHandler.Counter(accessHistoryNew).Record(1)
+		return true
+	}
+	metricsHandler.Counter(accessHistoryOld).Record(1)
+	return false
 }
 
 func (s *Service) GetFaultInjection() *client.FaultInjectionDataStoreFactory {

@@ -92,6 +92,7 @@ func NewTestController(
 		logger:                      resource.GetLogger(),
 		throttledLogger:             resource.GetThrottledLogger(),
 		contextTaggedLogger:         log.With(resource.GetLogger(), tag.ComponentShardController, tag.Address(resource.GetHostInfo().Identity())),
+		visibilityManager:           resource.GetVisibilityManager(),
 		persistenceExecutionManager: resource.GetExecutionManager(),
 		persistenceShardManager:     resource.GetShardManager(),
 		clientBean:                  resource.GetClientBean(),

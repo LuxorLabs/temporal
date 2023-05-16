@@ -883,6 +883,28 @@ func (adh *AdminHandler) DescribeHistoryHost(ctx context.Context, request *admin
 func (adh *AdminHandler) GetWorkflowExecutionRawHistoryV2(ctx context.Context, request *adminservice.GetWorkflowExecutionRawHistoryV2Request) (_ *adminservice.GetWorkflowExecutionRawHistoryV2Response, retError error) {
 	defer log.CapturePanic(adh.logger, &retError)
 
+	if adh.config.accessHistory(adh.metricsHandler) {
+		response, err := adh.historyClient.GetWorkflowExecutionRawHistoryV2(ctx,
+			&historyservice.GetWorkflowExecutionRawHistoryV2Request{
+				NamespaceId:       request.NamespaceId,
+				Execution:         request.Execution,
+				StartEventId:      request.StartEventId,
+				StartEventVersion: request.StartEventVersion,
+				EndEventId:        request.EndEventId,
+				EndEventVersion:   request.EndEventVersion,
+				MaximumPageSize:   request.MaximumPageSize,
+				NextPageToken:     request.NextPageToken,
+			})
+		if err != nil {
+			return nil, err
+		}
+		return &adminservice.GetWorkflowExecutionRawHistoryV2Response{
+			NextPageToken:  response.NextPageToken,
+			HistoryBatches: response.HistoryBatches,
+			VersionHistory: response.VersionHistory,
+			HistoryNodeIds: response.HistoryNodeIds,
+		}, nil
+	}
 	return adh.getWorkflowExecutionRawHistoryV2(ctx, request)
 }
 
@@ -1521,6 +1543,24 @@ func (adh *AdminHandler) DeleteWorkflowExecution(
 		return nil, err
 	}
 
+	namespaceID, err := adh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
+	if err != nil {
+		return nil, err
+	}
+
+	if adh.config.accessHistory(adh.metricsHandler) {
+		response, err := adh.historyClient.ForceDeleteWorkflowExecution(ctx,
+			&historyservice.ForceDeleteWorkflowExecutionRequest{
+				NamespaceId: namespaceID.String(),
+				Execution:   request.Execution,
+			})
+		if err != nil {
+			return nil, err
+		}
+		return &adminservice.DeleteWorkflowExecutionResponse{
+			Warnings: response.Warnings,
+		}, nil
+	}
 	return adh.deleteWorkflowExecution(ctx, request)
 }
 

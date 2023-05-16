@@ -62,6 +62,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
+	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/rpc"
 	"go.temporal.io/server/common/searchattribute"
@@ -101,6 +102,7 @@ type (
 		shardID             int32
 		owner               string
 		stringRepr          string
+		visibilityManager   manager.VisibilityManager
 		executionManager    persistence.ExecutionManager
 		metricsHandler      metrics.Handler
 		eventsCache         events.Cache
@@ -198,6 +200,11 @@ func (s *ContextImpl) GetShardID() int32 {
 func (s *ContextImpl) GetOwner() string {
 	// constant from initialization, no need for locks
 	return s.owner
+}
+
+func (s *ContextImpl) GetVisibilityManager() manager.VisibilityManager {
+	// constant from initialization, no need for locks
+	return s.visibilityManager
 }
 
 func (s *ContextImpl) GetExecutionManager() persistence.ExecutionManager {
@@ -1821,6 +1828,7 @@ func newContext(
 	closeCallback func(*ContextImpl),
 	logger log.Logger,
 	throttledLogger log.Logger,
+	visibilityManager manager.VisibilityManager,
 	persistenceExecutionManager persistence.ExecutionManager,
 	persistenceShardManager persistence.ShardManager,
 	clientBean client.Bean,
@@ -1845,6 +1853,7 @@ func newContext(
 		shardID:                 shardID,
 		owner:                   fmt.Sprintf("%s-%v-%v", hostIdentity, sequenceID, uuid.New()),
 		stringRepr:              fmt.Sprintf("Shard(%d)", shardID),
+		visibilityManager:       visibilityManager,
 		executionManager:        persistenceExecutionManager,
 		metricsHandler:          metricsHandler,
 		closeCallback:           closeCallback,

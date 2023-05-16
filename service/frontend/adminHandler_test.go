@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/resourcetest"
 	"testing"
 
@@ -126,7 +127,8 @@ func (s *adminHandlerSuite) SetupTest() {
 	}
 
 	cfg := &Config{
-		NumHistoryShards: 4,
+		NumHistoryShards:      4,
+		AccessHistoryFraction: dynamicconfig.GetFloatPropertyFn(0.0),
 	}
 	args := NewAdminHandlerArgs{
 		persistenceConfig,

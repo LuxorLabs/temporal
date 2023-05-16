@@ -78,6 +78,10 @@ var (
 		"UpdateWorkflowExecution":                0,
 		"PollWorkflowExecutionUpdate":            0,
 		"StreamWorkflowReplicationMessages":      0,
+		"GetWorkflowExecutionHistory":            0,
+		"GetWorkflowExecutionHistoryReverse":     0,
+		"GetWorkflowExecutionRawHistoryV2":       0,
+		"ForceDeleteWorkflowExecution":           0,
 	}
 
 	APIPrioritiesOrdered = []int{0}

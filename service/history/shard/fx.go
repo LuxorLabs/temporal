@@ -40,6 +40,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
+	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/consts"
@@ -57,6 +58,7 @@ func ControllerProvider(
 	config *configs.Config,
 	logger log.Logger,
 	throttledLogger log.ThrottledLogger,
+	visibilityManager manager.VisibilityManager,
 	persistenceExecutionManager persistence.ExecutionManager,
 	persistenceShardManager persistence.ShardManager,
 	clientBean client.Bean,
@@ -83,6 +85,7 @@ func ControllerProvider(
 		contextTaggedLogger:         logger,          // will add tags in Start
 		throttledLogger:             throttledLogger, // will add tags in Start
 		config:                      config,
+		visibilityManager:           visibilityManager,
 		persistenceExecutionManager: persistenceExecutionManager,
 		persistenceShardManager:     persistenceShardManager,
 		clientBean:                  clientBean,
