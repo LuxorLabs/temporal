@@ -1222,6 +1222,7 @@ var (
 	ServiceFailures                               = NewCounterDef("service_errors")
 	ServiceErrorWithType                          = NewCounterDef("service_error_with_type")
 	ServiceCriticalFailures                       = NewCounterDef("service_errors_critical")
+	ServicePanic                                  = NewCounterDef("service_panics")
 	ServiceLatency                                = NewTimerDef("service_latency")
 	ServiceLatencyNoUserLatency                   = NewTimerDef("service_latency_nouserlatency")
 	ServiceLatencyUserLatency                     = NewTimerDef("service_latency_userlatency")
