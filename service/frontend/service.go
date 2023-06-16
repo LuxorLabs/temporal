@@ -287,6 +287,7 @@ type Service struct {
 	grpcListener                   net.Listener
 	metricsHandler                 metrics.Handler
 	faultInjectionDataStoreFactory *client.FaultInjectionDataStoreFactory
+	membershipMonitor              membership.Monitor
 }
 
 func NewService(
@@ -302,6 +303,7 @@ func NewService(
 	grpcListener net.Listener,
 	metricsHandler metrics.Handler,
 	faultInjectionDataStoreFactory *client.FaultInjectionDataStoreFactory,
+	membershipMonitor membership.Monitor,
 ) *Service {
 	return &Service{
 		status:                         common.DaemonStatusInitialized,
@@ -317,6 +319,7 @@ func NewService(
 		grpcListener:                   grpcListener,
 		metricsHandler:                 metricsHandler,
 		faultInjectionDataStoreFactory: faultInjectionDataStoreFactory,
+		membershipMonitor:              membershipMonitor,
 	}
 }
 
@@ -345,11 +348,15 @@ func (s *Service) Start() {
 	s.operatorHandler.Start()
 	s.handler.Start()
 
-	listener := s.grpcListener
-	logger.Info("Starting to serve on frontend listener")
-	if err := s.server.Serve(listener); err != nil {
-		logger.Fatal("Failed to serve on frontend listener", tag.Error(err))
-	}
+	go func() {
+		logger.Info("Starting to serve on frontend listener")
+		if err := s.server.Serve(s.grpcListener); err != nil {
+			logger.Fatal("Failed to serve on frontend listener", tag.Error(err))
+		}
+	}()
+
+	s.membershipMonitor.Start()
+	logger.Info("frontend started")
 }
 
 // Stop stops the service
