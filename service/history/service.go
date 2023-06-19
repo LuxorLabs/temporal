@@ -116,6 +116,13 @@ func (s *Service) Start() {
 		}
 	}()
 
+	if delay := s.config.StartupMembershipJoinDelay(); delay > 0 {
+		logger.Info("history start: sleeping before membership start",
+			tag.NewDurationTag("startupMembershipJoinDelay", delay))
+		time.Sleep(delay)
+	}
+
+	logger.Info("history start: starting membership")
 	s.membershipMonitor.Start()
 	logger.Info("history started")
 }
