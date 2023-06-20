@@ -499,3 +499,15 @@ func (s *contextSuite) TestHandoverNamespace() {
 	_, ok = handoverNS[namespaceEntry.Name().String()]
 	s.False(ok)
 }
+
+func (s *contextSuite) TestCloseCallbackShardOwnershipLost() {
+	s.mockShard.state = contextStateAcquired
+	s.mockShardManager.EXPECT().AssertShardOwnership(gomock.Any(), gomock.Any()).
+		Return(&persistence.ShardOwnershipLostError{}).Times(1)
+
+	err := s.mockShard.AssertOwnership(context.Background())
+	s.Error(err)
+
+	s.False(s.mockShard.IsValid())
+	s.Equal(stopReasonOwnershipLost, s.mockShard.getStopReason())
+}

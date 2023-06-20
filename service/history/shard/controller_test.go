@@ -36,15 +36,14 @@ import (
 	"testing"
 	"time"
 
-	"go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/primitives"
-
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"go.temporal.io/server/api/enums/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/convert"
 	"go.temporal.io/server/common/log"
@@ -52,8 +51,10 @@ import (
 	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/resourcetest"
+	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/internal/goro"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/tasks"
@@ -114,6 +115,7 @@ func NewTestController(
 		shutdownCh:           make(chan struct{}),
 		taggedMetricsHandler: resource.GetMetricsHandler().WithTags(metrics.OperationTag(metrics.HistoryShardControllerScope)),
 		historyShards:        make(map[int32]*ContextImpl),
+		lastOwnershipLost:    make(map[int32]time.Time),
 	}
 }
 
@@ -480,7 +482,7 @@ func (s *controllerSuite) TestShardExplicitUnload() {
 	s.NoError(err)
 	s.Equal(1, len(s.shardController.ShardIDs()))
 
-	shard.Unload()
+	shard.UnloadForOwnershipLost()
 
 	for tries := 0; tries < 100 && len(s.shardController.ShardIDs()) != 0; tries++ {
 		// removal from map happens asynchronously
@@ -526,7 +528,7 @@ func (s *controllerSuite) TestShardExplicitUnloadCancelGetOrCreate() {
 	s.False(shard.engineFuture.Ready())
 
 	start := time.Now()
-	shard.Unload() // this cancels the context so GetOrCreateShard returns immediately
+	shard.UnloadForOwnershipLost() // this cancels the context so GetOrCreateShard returns immediately
 	s.True(<-wasCanceled)
 	s.Less(time.Since(start), 500*time.Millisecond)
 }
@@ -579,7 +581,7 @@ func (s *controllerSuite) TestShardExplicitUnloadCancelAcquire() {
 	s.False(shard.engineFuture.Ready())
 
 	start := time.Now()
-	shard.Unload() // this cancels the context so UpdateShard returns immediately
+	shard.UnloadForOwnershipLost() // this cancels the context so UpdateShard returns immediately
 	s.True(<-wasCanceled)
 	s.Less(time.Since(start), 500*time.Millisecond)
 }
@@ -677,7 +679,7 @@ func (s *controllerSuite) TestShardControllerFuzz() {
 				}
 			case 2:
 				if _, shard := randomLoadedShard(); shard != nil {
-					shard.Unload()
+					shard.UnloadForOwnershipLost()
 				}
 			case 3:
 				if id, _ := randomLoadedShard(); id >= 0 {
@@ -721,6 +723,64 @@ func (s *controllerSuite) Test_GetOrCreateShard_InvalidShardID() {
 
 	_, err = s.shardController.getOrCreateShardContext(3)
 	s.ErrorIs(err, invalidShardIdUpperBound)
+}
+
+func (s *controllerSuite) TestShardReacquireMinDuration() {
+	shardID := int32(1)
+	s.config.NumberOfShards = 1
+
+	// First acquire the shard.
+	mockEngine := NewMockEngine(s.controller)
+	s.setupMocksForAcquireShard(shardID, mockEngine, 5, 6, true)
+
+	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
+	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
+	s.shardController.acquireShards()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	shard, err := s.shardController.GetShardByID(shardID)
+	s.NoError(err)
+	s.NotNil(shard)
+	engine, err := shard.GetEngine(ctx)
+	s.NoError(err)
+	s.NotNil(engine)
+
+	// Now that shard is acquired, mock losing it due to shard ownership lost.
+	timeSource := clock.NewEventTimeSource()
+	s.shardController.timeSource = timeSource
+	testStartTime := time.Now().UTC()
+	mockEngine.EXPECT().Stop()
+	timeSource.Update(testStartTime)
+
+	shard.UnloadForOwnershipLost()
+	s.False(shard.IsValid())
+
+	// Try to acquire the shard, and expect to be denied.
+	shardReacquireMinDuration := 5 * time.Second
+	s.config.ShardOwnershipLostReacquireMinDuration = func() time.Duration {
+		return shardReacquireMinDuration
+	}
+	s.mockServiceResolver.EXPECT().Lookup(convert.Int32ToString(shardID)).Return(s.hostInfo, nil)
+	shard, err = s.shardController.GetShardByID(shardID)
+	s.Error(err)
+	s.Nil(shard)
+	solErr, ok := err.(*serviceerrors.ShardOwnershipLost)
+	s.True(ok)
+	// The SOL error returned should not have an OwnerHost field.
+	s.Empty(solErr.OwnerHost)
+	s.Equal(s.hostInfo.Identity(), solErr.CurrentHost)
+
+	// Move time beyond the ShardOwnershipLostReacquireMinDuration, and expect success.
+	timeSource.Update(testStartTime.Add(2 * shardReacquireMinDuration))
+	s.setupMocksForAcquireShard(shardID, mockEngine, 6, 7, false)
+	shard, err = s.shardController.GetShardByID(shardID)
+	s.NoError(err)
+	s.NotNil(shard)
+	engine, err = shard.GetEngine(ctx)
+	s.NoError(err)
+	s.NotNil(engine)
 }
 
 func (s *controllerSuite) setupMocksForAcquireShard(

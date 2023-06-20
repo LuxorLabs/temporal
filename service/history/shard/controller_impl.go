@@ -58,6 +58,8 @@ import (
 
 const (
 	shardControllerMembershipUpdateListenerName = "ShardController"
+
+	maxShardOwnershipLostReacquireMinDuration = 5 * time.Second
 )
 
 var (
@@ -78,6 +80,7 @@ type (
 
 		sync.RWMutex
 		historyShards               map[int32]*ContextImpl
+		lastOwnershipLost           map[int32]time.Time
 		logger                      log.Logger
 		persistenceExecutionManager persistence.ExecutionManager
 		persistenceShardManager     persistence.ShardManager
@@ -282,8 +285,36 @@ func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, e
 			return shard, nil
 		}
 
-		shard.Unload()
+		// If we have an invalid shard in our map, then our shard closed
+		// callback hasn't run yet. So we need to check for & update our
+		// last ownership lost map here, before we try to re-acquire the
+		// shard.
+		// TODO: when we add an entry to lastOwnershipLost, we need to
+		// set a timer to run `acquireShards()` again when it expires.
+		if shard.getStopReason() == stopReasonOwnershipLost {
+			c.lastOwnershipLost[shardID] = c.timeSource.Now()
+		}
 		delete(c.historyShards, shardID)
+	}
+
+	// We can receive a shard ownership lost error from persistence before our
+	// membership client has seen the update that caused another history instance
+	// to acquire the shard.
+	if lastOwnershipLost, ok := c.lastOwnershipLost[shardID]; ok {
+		if minDuration := c.config.ShardOwnershipLostReacquireMinDuration(); minDuration > 0 {
+			minDuration = util.Min(minDuration, maxShardOwnershipLostReacquireMinDuration)
+			if c.timeSource.Now().Sub(lastOwnershipLost) < minDuration {
+				c.throttledLogger.Warn("Shard attempted acquire before ShardOwnershipLostReacquireMinDuration",
+					tag.ShardID(shardID),
+					tag.NewTimeTag("lastOwnershipLost", lastOwnershipLost),
+				)
+				// We use a blank OwnerHost so that history clients won't spin
+				// in their ownership lost retry loop; they should see this
+				// error and perform backoff before retrying, which could allow
+				// time for our membership view to get updated.
+				return nil, serviceerrors.NewShardOwnershipLost("", hostInfo.GetAddress())
+			}
+		}
 	}
 
 	if atomic.LoadInt32(&c.status) == common.DaemonStatusStopped {
@@ -316,6 +347,7 @@ func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, e
 	}
 	shard.start()
 	c.historyShards[shardID] = shard
+	delete(c.lastOwnershipLost, shardID)
 	c.taggedMetricsHandler.Counter(metrics.ShardContextCreatedCounter.GetMetricName()).Record(1)
 
 	shard.contextTaggedLogger.Info("", tag.LifeCycleStarted, tag.ComponentShardContext)
@@ -331,10 +363,17 @@ func (c *ControllerImpl) removeShard(shardID int32, expected *ContextImpl) (*Con
 	if !ok {
 		return nil, nShards
 	}
-	if expected != nil && current != expected {
-		// the shard comparison is a defensive check to make sure we are deleting
-		// what we intend to delete.
-		return nil, nShards
+	if expected != nil {
+		if current != expected {
+			// the shard comparison is a defensive check to make sure we are deleting
+			// what we intend to delete.
+			return nil, nShards
+		}
+		// TODO: when we add an entry to lastOwnershipLost, we need to
+		// set a timer to run `acquireShards()` again when it expires.
+		if expected.getStopReason() == stopReasonOwnershipLost {
+			c.lastOwnershipLost[expected.GetShardID()] = c.timeSource.Now()
+		}
 	}
 
 	delete(c.historyShards, shardID)
@@ -355,6 +394,10 @@ func (c *ControllerImpl) shardManagementPump() {
 
 	acquireTicker := time.NewTicker(c.config.AcquireShardInterval())
 	defer acquireTicker.Stop()
+
+	// TODO: We should add & manage another timer here, that fires
+	// based on when we are past a shard ownership lost duration,
+	// so that we call acquireShards() after the duration.
 
 	for {
 		select {
