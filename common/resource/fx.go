@@ -355,7 +355,7 @@ func SdkClientFactoryProvider(
 	tlsConfigProvider encryption.TLSConfigProvider,
 	metricsHandler metrics.Handler,
 	logger log.SnTaggedLogger,
-	resolver membership.GRPCResolver,
+	resolver membership.GRPCResolverBuilder,
 	dc *dynamicconfig.Collection,
 ) (sdk.ClientFactory, error) {
 	frontendURL, frontendTLSConfig, err := getFrontendConnectionDetails(cfg, tlsConfigProvider, resolver)
@@ -368,6 +368,7 @@ func SdkClientFactoryProvider(
 		metricsHandler,
 		logger,
 		dc.GetIntProperty(dynamicconfig.WorkerStickyCacheSize, 0),
+		resolver,
 	), nil
 }
 
@@ -380,7 +381,7 @@ func RPCFactoryProvider(
 	svcName primitives.ServiceName,
 	logger log.Logger,
 	tlsConfigProvider encryption.TLSConfigProvider,
-	resolver membership.GRPCResolver,
+	resolver membership.GRPCResolverBuilder,
 	traceInterceptor telemetry.ClientTraceInterceptor,
 ) (common.RPCFactory, error) {
 	svcCfg := cfg.Services[string(svcName)]
@@ -404,7 +405,7 @@ func RPCFactoryProvider(
 func getFrontendConnectionDetails(
 	cfg *config.Config,
 	tlsConfigProvider encryption.TLSConfigProvider,
-	resolver membership.GRPCResolver,
+	resolver membership.GRPCResolverBuilder,
 ) (string, *tls.Config, error) {
 	// To simplify the static config, we switch default values based on whether the config
 	// defines an "internal-frontend" service. The default for TLS config can be overridden

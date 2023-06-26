@@ -779,7 +779,7 @@ func copyPersistenceConfig(pConfig config.Persistence) (config.Persistence, erro
 }
 
 func sdkClientFactoryProvider(
-	resolver membership.GRPCResolver,
+	resolver membership.GRPCResolverBuilder,
 	metricsHandler metrics.Handler,
 	logger log.Logger,
 	dc *dynamicconfig.Collection,
@@ -790,6 +790,7 @@ func sdkClientFactoryProvider(
 		metricsHandler,
 		logger,
 		dc.GetIntProperty(dynamicconfig.WorkerStickyCacheSize, 0),
+		resolver,
 	)
 }
 
@@ -823,7 +824,7 @@ func (c *rpcFactoryImpl) CreateInternodeGRPCConnection(hostName string) *grpc.Cl
 	return c.CreateGRPCConnection(hostName)
 }
 
-func newRPCFactoryImpl(sn primitives.ServiceName, grpcHostPort listenHostPort, logger log.Logger, resolver membership.GRPCResolver) common.RPCFactory {
+func newRPCFactoryImpl(sn primitives.ServiceName, grpcHostPort listenHostPort, logger log.Logger, resolver membership.GRPCResolverBuilder) common.RPCFactory {
 	return &rpcFactoryImpl{
 		serviceName:  sn,
 		grpcHostPort: string(grpcHostPort),

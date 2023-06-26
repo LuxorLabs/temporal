@@ -25,10 +25,8 @@
 package membership
 
 import (
-	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"go.uber.org/fx"
 	"google.golang.org/grpc/resolver"
@@ -38,49 +36,30 @@ import (
 
 const grpcResolverScheme = "membership"
 
-// GRPCResolver is an empty type used to enforce a dependency using fx so that we're guaranteed to have initialized
-// the global builder before we use it.
-type GRPCResolver struct{}
+// GRPCResolverBuilder is a [resolver.Builder] that uses the membership subsystem to resolve a service name to a list
+// of host:port addresses.
+type GRPCResolverBuilder struct {
+	monitor Monitor
+}
 
-var (
-	GRPCResolverModule = fx.Options(
-		fx.Provide(initializeBuilder),
-	)
-
-	globalGrpcBuilder grpcBuilder
+var GRPCResolverModule = fx.Options(
+	fx.Provide(func(monitor Monitor) GRPCResolverBuilder {
+		return GRPCResolverBuilder{monitor: monitor}
+	}),
 )
 
-func init() {
-	// This must be called in init to avoid race conditions. We don't have a Monitor yet, so we'll leave it nil and
-	// initialize it with fx.
-	resolver.Register(&globalGrpcBuilder)
-}
-
-func initializeBuilder(monitor Monitor) GRPCResolver {
-	globalGrpcBuilder.monitor.Store(monitor)
-	return GRPCResolver{}
-}
-
-func (g *GRPCResolver) MakeURL(service primitives.ServiceName) string {
+func (b GRPCResolverBuilder) MakeURL(service primitives.ServiceName) string {
 	return fmt.Sprintf("%s://%s", grpcResolverScheme, string(service))
 }
 
-type grpcBuilder struct {
-	monitor atomic.Value // Monitor
-}
-
-func (m *grpcBuilder) Scheme() string {
+func (b GRPCResolverBuilder) Scheme() string {
 	return grpcResolverScheme
 }
 
-func (m *grpcBuilder) Build(target resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (resolver.Resolver, error) {
-	monitor, ok := m.monitor.Load().(Monitor)
-	if !ok {
-		return nil, errors.New("grpc resolver has not been initialized yet")
-	}
+func (b GRPCResolverBuilder) Build(target resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (resolver.Resolver, error) {
 	// See MakeURL: the service ends up as the "host" of the parsed URL
 	service := target.URL.Host
-	serviceResolver, err := monitor.GetResolver(primitives.ServiceName(service))
+	serviceResolver, err := b.monitor.GetResolver(primitives.ServiceName(service))
 	if err != nil {
 		return nil, err
 	}

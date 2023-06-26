@@ -28,6 +28,8 @@ package sdk
 
 import (
 	"crypto/tls"
+	"go.temporal.io/server/common/membership"
+	"google.golang.org/grpc"
 	"sync"
 
 	sdkclient "go.temporal.io/sdk/client"
@@ -61,6 +63,7 @@ type (
 		systemSdkClient sdkclient.Client
 		stickyCacheSize dynamicconfig.IntPropertyFn
 		once            sync.Once
+		resolver        membership.GRPCResolverBuilder
 	}
 )
 
@@ -74,6 +77,7 @@ func NewClientFactory(
 	metricsHandler metrics.Handler,
 	logger log.Logger,
 	stickyCacheSize dynamicconfig.IntPropertyFn,
+	resolver membership.GRPCResolverBuilder,
 ) *clientFactory {
 	return &clientFactory{
 		hostPort:        hostPort,
@@ -82,6 +86,7 @@ func NewClientFactory(
 		logger:          logger,
 		sdklogger:       log.NewSdkLogger(logger),
 		stickyCacheSize: stickyCacheSize,
+		resolver:        resolver,
 	}
 }
 
@@ -91,6 +96,9 @@ func (f *clientFactory) options(options sdkclient.Options) sdkclient.Options {
 	options.Logger = f.sdklogger
 	options.ConnectionOptions = sdkclient.ConnectionOptions{
 		TLS: f.tlsConfig,
+		DialOptions: []grpc.DialOption{
+			grpc.WithResolvers(f.resolver),
+		},
 	}
 	return options
 }
